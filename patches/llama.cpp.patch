@@ -76,3 +76,53 @@ index cb6cf1f28..28ca913ae 100644
      if (cparams.n_rs_seq > 0 && !llm_arch_supports_rs_rollback(model.arch)) {
          LLAMA_LOG_DEBUG("%s: n_rs_seq=%u requested but model does not support recurrent partial rollback; clamping to 0\n",
                          __func__, cparams.n_rs_seq);
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index c2ac6a50b..b0adf9bae 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1277,6 +1277,7 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
+             case LLM_ARCH_QWEN35MOE:
+             case LLM_ARCH_QWEN3NEXT:
+             case LLM_ARCH_DSPARK:
++            case LLM_ARCH_DFLASH:
+                 break;
+             default:
+                 throw std::runtime_error(format(
+@@ -1284,7 +1285,7 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
+                     llm_arch_name(arch)));
+         }
+ 
+-        const auto is_foldable_weight = [](const std::string & name) {
++        const auto is_foldable_weight = [this](const std::string & name) {
+             static const char * kinds[] = {
+                 "attn_q", "attn_k", "attn_v", "attn_qkv", "attn_gate", "attn_output",
+                 "ffn_gate", "ffn_up", "ffn_down",
+@@ -1292,9 +1293,14 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
+                 "ffn_gate_shexp", "ffn_up_shexp", "ffn_down_shexp",
+                 "ssm_out",
+             };
++            // dflash builds these through build_lora_mm (models/dflash.cpp)
++            static const char * dflash_kinds[] = { "attn_conv_proj", "ffn_conv_proj" };
+             if (name == "output.weight") {
+                 return true; // the output head is built through build_lora_mm in every arch
+             }
++            if (arch == LLM_ARCH_DFLASH && name == "fc.weight") {
++                return true;
++            }
+             if (name.compare(0, 4, "blk.") != 0) {
+                 return false;
+             }
+@@ -1312,6 +1318,13 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
+                     return true;
+                 }
+             }
++            if (arch == LLM_ARCH_DFLASH) {
++                for (const char * kind : dflash_kinds) {
++                    if (name.compare(pos, std::string::npos, std::string(kind) + ".weight") == 0) {
++                        return true;
++                    }
++                }
++            }
+             return false;
+         };
+ 
